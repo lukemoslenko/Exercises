@@ -312,7 +312,7 @@ XG_TOI <- left_join(XG_TOI, salary_data, by = "event_player_1_name")
 
 xG_TOI <- XG_TOI %>%
   
-  ## #
+  ## ##
   #grepl()
   
 
