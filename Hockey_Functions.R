@@ -68,7 +68,7 @@ nhldataclean <- function(dataframe){
   train_pbp$strength_state <- as.factor(train_pbp$strength_state)
   train_pbp$event_goalie_name  <- as.factor(train_pbp$event_goalie_name)
   train_pbp$event_goalie_name <- ifelse(is.na(train_pbp$event_goalie_name), "EMPTYNET", as.factor(train_pbp$event_goalie_name))
-  
+  train_pbp$game_date <- ymd(train_pbp$game_date)
   
   ## Filter out unusual strength states
   train_pbp <- train_pbp %>% filter(strength_state %in% normal_strength_state)
