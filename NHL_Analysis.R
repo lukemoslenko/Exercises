@@ -1,14 +1,14 @@
 
 #### Hockey Data Analytics ####
-### ES 8913 Final PRoject ###
+### ES 8913 Final Project ###
 ### Luke Moslenko ###
 
 # Source Functions and Packages --------------------------------------------------------
 ## Load Packages
 library(hockeyR)
 library(tidyverse)
+library(lubridate)
 library(sportyR)
-library(ggimage)
 library(pROC)
 
 
@@ -32,7 +32,6 @@ pbp_18_19 <- load_pbp("2018-2019")
 
 # Training Data Set -------------------------------------------------------
 
-
 ## Combine 2018-19 & 19-20 seasons for training data
 train_pbp <- rbind(pbp_18_19, pbp_19_20)
 
@@ -41,7 +40,7 @@ train_pbp <- nhldataclean(train_pbp)
 
 ### Filtering Data
 
-fenwick_events <- c("SHOT","GOAL") 
+fenwick_events <- c("MISSED", "SHOT", "GOAL") 
 
 ## filtering to fenwick events
 Train_Fenwick_Data <- filter(train_pbp, event_type %in% fenwick_events) %>%
@@ -67,7 +66,7 @@ Test_Fenwick_Data <- nhldataclean(Test_Fenwick_Data)
 ## Write or load data for next stage
 #write.csv(Train_Fenwick_Data, file = "Train_Fenwick_data_v1.csv")
 
-#Train_Fenwick_Data <-  read.csv("Train_Fenwick_data_v1.csv")
+Train_Fenwick_Data <-  read.csv("Train_Fenwick_data_v1.csv")
 
 
 # Setting model up --------------------------------------------------------
@@ -91,7 +90,7 @@ xGmodel <- glm(is_goal ~ poly(shot_distance, 3, raw = TRUE) +
 save(xGmodel, file = "xGmodel.rda")
 
 ## Load model
-#load("~/Grad school/Winter 2022/Data Science/Exercises/xGmodel.rda") 
+load("~/Grad school/Winter 2022/Data Science/Exercises/xGmodel.rda") 
 
 
 # Model Evaluation --------------------------------------------------------
@@ -117,9 +116,11 @@ pR2(xGmodel)
 
 
 ## Predict expected goals
-Test_Fenwick_Data$xG <- predict(xGmodel, Test_Fenwick_Data, type = "response")
+xG <- predict(xGmodel, Test_Fenwick_Data , type = "response")
 
 g <- roc(is_goal ~ xG, data = Test_Fenwick_Data)
+
+g
 
 
 # Visualization of xG on ice rink -----------------------------------------
@@ -153,7 +154,7 @@ ggplot(avg_xG_by_coord, aes(abs_x, y_fixed, fill = xg)) + geom_raster() +
 ## How to filter for a specific game
   ## Select date & Add home team three letter abbreviation
 game <- pbp_20_21 %>%
-  filter(game_date == "2021-03-31" & home_abbreviation == "WPG")
+  filter(game_date == "2021-01-15" & home_abbreviation == "TBL")
 
 ## Split season by game
 pbp_20_21$game_id <- as.factor(pbp_20_21$game_id)
@@ -215,11 +216,14 @@ geom_hockey("nhl") +
 ## Clean game data
 game <- nhldataclean(game)
 
+game <- game %>% filter(event_type %in% fenwick_events)
+
+game$xG <- predict(xGmodel, game, type = "response")
+
 ## Group events by player and team, calculate expected and difference between prediction and reality
 xg_player_game <- game %>%
   group_by(event_player_1_name, event_team) %>%
   summarise( xG = sum(xG), Goals = sum(is_goal), Difference = sum(is_goal) - sum(xG))
-head(xg_player)
 
 ## Round Expected Goals to three digits
 xg_player_game$xG <- round(xg_player_game$xG, digits = 3)
@@ -232,11 +236,12 @@ xg_player_game <- xg_player_game %>%
 ## Stacked xG per game
 ggplot(xg_player_game, aes(x = event_team, y = xG, fill = event_player_1_name, group = event_team)) +
   geom_col(position = "stack", show.legend = FALSE, colour = "black" ) +
-  geom_text(aes(y = pos, label = event_player_1_name), vjust = 1.05, colour = "black", size =3.5) +
+  geom_text(aes(y = pos, label = event_player_1_name), vjust = 1.15, colour = "black", size =3.5) +
   labs(title = glue::glue("{unique(game$away_name)} @ {unique(game$home_name)}"),
        subtitle = glue::glue( "{unique(game$game_date)}\n  {unique(game$away_abbreviation)} {unique(game$away_final)} - {unique(game$home_final)} {unique(game$home_abbreviation)}"),
        x = NULL, y = "Expected Goals") +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom")+
+  theme(axis.title = element_text(size = 10)) 
 
 
 
@@ -264,8 +269,9 @@ xg_time <- ggplot(game, aes(x = game_seconds, y = cumulative_xG, group = event_t
 ## Expected Goals by Player
 xg_player_glm <- Test_Fenwick_Data %>%
   group_by(event_player_1_name) %>%
-  summarise(xG = sum(xG), Goals = sum(is_goal), Difference = (sum(is_goal) - sum(xG)))
+  summarise(xG = sum(xG), Goals = sum(is_goal), Difference = (sum(is_goal) - sum(xG)), eventteam = event_team)
 
+xg_player_glm <- unique(xg_player_glm)
 
 ## Visualization Goals vs Expected Goals
 ggplot(data = xg_player_glm, aes(x = Goals, y = xG)) +
@@ -297,7 +303,7 @@ ggplot(aes(x = xG, y = Goals), data = xg_team) +
 ##Calculate total time on ice (Need data with all events = pbp_**_**)
 nhldataclean(pbp_20_21)
 
-player_TOI <- TOI_calc(train_pbp)
+player_TOI <- TOI_calc(pbp_20_21)
 
 train_pbp <- nhldataclean(pbp_20_21)
 
@@ -308,13 +314,12 @@ XG_TOI <- left_join(player_TOI, xg_player_glm)
 salary_data <- read.csv("player_salary_2021.csv")
 
 ## Join Salary Data to xG and TOI data
-XG_TOI <- left_join(XG_TOI, salary_data, by = "event_player_1_name")
-
-xG_TOI <- XG_TOI %>%
+XG_TOI <- right_join(XG_TOI, salary_data, by = "event_player_1_name", drop = TRUE)
   
   ## ##
   #grepl()
   
+
 
 ## Calculate xG per 60 mins of Ice (Standardization)
 XG_TOI$xG_per60 <- XG_TOI$xG / XG_TOI$TOI60
@@ -322,30 +327,91 @@ XG_TOI$xG_per60 <- XG_TOI$xG / XG_TOI$TOI60
 ## Calculate dollar per xG
 XG_TOI$dollar_perxg60 <- XG_TOI$CAP.HIT/ XG_TOI$xG_per60
 
-XG_TOI$dollar_perxg60 <- XG_TOI$CAP.HIT/ XG_TOI$xG 
+XG_TOI_calc$dollar_perxg <- XG_TOI$CAP.HIT/ XG_TOI$xG 
 
 ## Calculate dollar per real goal
-XG_TOI$dollars_pergoal <- XG_TOI$CAP.HIT / XG_TOI$xG
+XG_TOI$dollars_pergoal <- XG_TOI$CAP.HIT / XG_TOI$Goals
 
-write.csv(XG_TOI, file = "XG_TOI_calc.csv")
+## Position classifier
+defense <-c("LD", "RD", "LD/RD")
+leftwinger <- c("LW","LW, RW", "LW, C", "LW, C, RW")
+rightwinger <- c("RW", "RW, LW", "RW, C", "RW, C, LW")
+center <- c("C", "C, LW", "C, RW", "C, LW, RW", "C, RW, LW")
+
+## Make Position a Factor
+XG_TOI$Position <- ifelse(XG_TOI$POS %in% defense, "Defense", ifelse(XG_TOI$POS %in% leftwinger, "Leftwinger", ifelse(XG_TOI$POS %in% rightwinger, "Rightwinger", ifelse(XG_TOI$POS %in% center, "Center", NA))))
+
+XG_TOI$Position <-as.factor(XG_TOI$Position)
+
+XG_TOI <- drop_na(XG_TOI)
+
+XG_TOI <- filter(XG_TOI, XG_TOI$Position != "Defense") 
+
+#write.csv(XG_TOI, file = "XG_TOI_calc.csv")
+XG_TOI_calc <- read.csv("XG_TOI_calc.csv")
 
 ## Visualizations
-
-
-ggplot(XG_TOI, aes(x = xG, y = dollar_perxg60)) +
-  geom_point()
+ggplot(XG_TOI, aes(x = xG, y = dollar_perxg, shape = Position)) +
+  geom_point(size = 2.75) +
+  labs(x = "Expected Goals", 
+       y = "Dollars per Expected Goal")+
+  scale_y_continuous(labels = scales::comma, breaks = c(100000,200000, 300000, 400000, 500000, 1000000, 2000000, 3000000, 4000000)) 
+  
 
 
 ggplot() +
   geom_image(x = xG, y = )
 
 
+XG_TOI_calc_test <- filter(XG_TOI_calc, XG_TOI_calc$dollar_perxg > 750000)
+XG_TOI_calc_test$eventteam <- as.factor(XG_TOI_calc_test$eventteam)
 
+t <- XG_TOI_calc_test %>%
+  group_by(eventteam) %>%
+  summarise(mdpg = mean(dollars_pergoal, na.rm = TRUE))
+
+t <- drop_na(t)
+
+write.csv(t, file = "t.csv")
+
+t <- read.csv("t.csv")
+
+t$playoffs <- as.factor(t$playoffs)
+
+t <- t[order(t$mdpg),]
+
+ggplot(t, aes(x = reorder(eventteam, +mdpg), y = mdpg, fill = playoffs)) +
+  geom_bar(stat = "identity") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_text(label = t$Rank, vjust = -0.6) +
+  scale_y_continuous(labels = scales::comma) +
+  geom_hline(yintercept = 452777) +
+  geom_text(aes(x = 19.9,y = 435000, label = "Average cost per goal: Salary Cap"), size = 3) +
+  geom_vline(xintercept = 16.5) +
+  geom_text(aes(x = 16.8, label = "Playoff cutoff", y = 800000), angle = 90, size = 3) +
+  labs(x = "NHL Team", 
+       y = "Average Dollars per Expected Goal")
+
+## Summarize by team
+bad_deal <- filter(XG_TOI_calc_test ,XG_TOI_calc_test$dollars_pergoal > 452777)
+
+
+
+bad_deal %>%
+  count(eventteam)
+
+good_deal <- filter(XG_TOI_calc_test ,XG_TOI_calc_test$dollars_pergoal <= 452777)
+
+good_deal %>%
+  count(eventteam)
 
 # Predicting the Outcome of Games with Model ------------------------------
 
+## Filter for regular season games
+regular_season <- subset(Train_Fenwick_Data, Train_Fenwick_Data$season_type == "R")
+
 ## Split data into list of games
-season_split <- split(Train_Fenwick_Data, f = Train_Fenwick_Data$game_id)
+season_split <- split(regular_season, f = regular_season$game_id)
 
 
 # Apply Expected Goal model to predict xG of each team in each game
@@ -373,7 +439,7 @@ for(i in 1:length(season_split)){
   
   xg_team_game <- game %>%
     group_by(event_team) %>%
-    summarise( xG = sum(xG), Goals = sum(is_goal), Difference = sum(is_goal) - sum(xG), ) 
+    summarise( xG = sum(xG), Goals = sum(is_goal), Difference = sum(is_goal) - sum(xG)) 
   
   xG_gameresults[[i]] <- xg_team_game
   
@@ -401,8 +467,17 @@ sum(xG_gamecheck$result)
 
 save(xG_gamecheck, file = "xG_gamecheck.rda")
 
-ggplot(xG_gamecheck, aes(x = Difference, y = result)) 
+## Visualization of correct prediction of time
 
+ggplot(xG_gamecheck, aes(x= event_team, y = result)) +
+  geom_col() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.9)) +
+  geom_hline(yintercept = 152) +
+  labs(x = "NHL Team", 
+       y = "Sum of Correct Predicitions", 
+       caption = "2018-2019 & 2019-2020 Regular Seasons") +
+  scale_y_continuous(breaks = c(0,10,20,30,40,50,60,70,80,90,100,110,120,130,140,150,152))
+  
 
 
 
@@ -410,10 +485,10 @@ ggplot(xG_gamecheck, aes(x = Difference, y = result))
 # Other Visualizations ----------------------------------------------------
 
 ## Coordinates for specific player
-player_name <- ("Brent.Burns")
+player_name <- ("Zach.Hyman")
 
 ## Player heatmap:
-player_xg <- Train_Fenwick_Data %>% filter(event_player_1_name == player_name)
+player_xg <- game %>% filter(event_player_1_name == player_name)
 
 ## Get abs of x coord
 player_xg$abs_x <- abs(player_xg$x_fixed)
@@ -429,7 +504,8 @@ ggplot(player_xg, aes(abs_x, y_fixed, colour = xG)) + geom_point() +
   xlab('X Coordinates') + ylab('Y Coordinates') +
   labs(title = 'Average xG Value by Coordinate',
        subtitle = player_name) +
-  geom_tile(aes(x = 89.665, y = 0, width = 3.33, height = 6))
+  geom_tile(aes(x = 89.665, y = 0, width = 3.33, height = 6))+
+  geom_blank(data = game, )
 
 ## Shot Heat Map 
 ggplot(player_xg, aes(x = abs_x, y = y_fixed)) +
@@ -442,3 +518,14 @@ ggplot(player_xg, aes(x = abs_x, y = y_fixed)) +
        subtitle = player_name) +
   geom_tile(aes(x = 89.665, y = 0, width = 3.33, height = 6), color = "white") +
   theme(legend.position = "none")
+
+ggplot(Test_Fenwick_Data, aes(x = shot_distance, y = xG, shape = secondary_type)) +
+         geom_point() +
+  labs(x = "Shot Distance (ft)", 
+       y = "Expected Goal", 
+       title = "Expected Goals by Shot Distance", 
+       shape = "Shot Type") +
+  scale_shape_manual(values = c(15,16,17,18,22,23,24))
+
+
+k <- lm(is_goal ~ xG, data = Test_Fenwick_Data)
